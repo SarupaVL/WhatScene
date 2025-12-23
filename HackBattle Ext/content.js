@@ -1,60 +1,44 @@
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    const startDate = new Date(request.startDate);
-    const endDate = new Date(request.endDate);
-    endDate.setHours(23, 59, 59); // Include messages till the end of the day
+const scrollUpAndExtract = () => {
+    const chat = document.querySelector("div[role='list']") || document.querySelector("div[data-testid='conversation-container']");
+    if (chat) {
+        chat.scrollTop = 0;  // Scroll to top to load older messages
+        setTimeout(extractMessages, scrollInterval);
+    } else {
+        console.error("Message container not found. Please ensure you are in the correct chat.");
+        sendResponse({ messages, count: messages.length }); // Send current messages and count
+    }
+};
 
-    let messages = new Set();
-    let messageCount = 0;
+const extractMessages = () => {
+    const elements = document.querySelectorAll("div.copyable-text");
+    elements.forEach(el => {
+        // Your existing message extraction logic...
 
-    const scrollInterval = 2000;  // Time interval between scroll attempts
-    let lastOldestMessageDate = null;  // Track the oldest message date from the previous scroll
+        // Send messages to the Python server
+        if (messageCount === 0 || chat.scrollHeight === lastScrollHeight) {
+            console.log(`Finished extracting messages. Total: ${messages.length}`);
 
-    const scrollUpAndExtract = () => {
-        window.scrollTo(0, 0); // Scroll to the top to load older messages
-        setTimeout(extractMessages, scrollInterval); // Wait for messages to load
-    };
+            // Send data to Python server
+            fetch('http://localhost:5000/api/messages', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(messages),
+            })
+            .then(response => response.json())
+            .then(data => {
+                // Process the response from the server
+                console.log("Processed data:", data);
+                displayProcessedData(data); // Call function to display processed data
+            })
+            .catch(error => console.error('Error sending data to server:', error));
 
-    const extractMessages = () => {
-        const elements = document.querySelectorAll('div.message-in, div.message-out');
-        let oldestMessageDate = null;
-
-        elements.forEach(el => {
-            const timeElement = el.querySelector('div.copyable-text');
-            const textElement = el.querySelector('span.selectable-text');
-
-            if (timeElement && textElement) {
-                const timeText = timeElement.getAttribute('data-pre-plain-text');
-                const textContent = textElement.textContent;
-
-                const match = timeText.match(/\[\d{2}:\d{2}, (\d{1,2})\/(\d{1,2})\/(\d{4})\]/);
-                if (match) {
-                    const messageDate = new Date(`${match[3]}-${match[2]}-${match[1]}`);
-
-                    if (messageDate >= startDate && messageDate <= endDate) {
-                        const messageEntry = `${timeText} ${textContent}`;
-                        if (!messages.has(messageEntry)) {
-                            messages.add(messageEntry);
-                            messageCount++;
-                            chrome.runtime.sendMessage({ count: messageCount, messages: Array.from(messages) });
-                        }
-                    }
-
-                    if (!oldestMessageDate || messageDate < oldestMessageDate) {
-                        oldestMessageDate = messageDate;
-                    }
-                }
-            }
-        });
-
-        // Stop scrolling if we've reached the start date or messages are repeating
-        if (oldestMessageDate && (oldestMessageDate <= startDate || oldestMessageDate === lastOldestMessageDate)) {
-            console.log('Reached the date range or no new messages to load.');
-            return;
+            sendResponse({ messages, count: messages.length });
+        } else {
+            lastScrollHeight = chat.scrollHeight;
+            scrollUpAndExtract();
         }
-
-        lastOldestMessageDate = oldestMessageDate;
-        scrollUpAndExtract();  // Continue scrolling up for older messages
-    };
-
-    scrollUpAndExtract();  // Start the scrolling and extraction process
-});
+    });
+    
+};
